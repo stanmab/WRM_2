@@ -1,6 +1,10 @@
 # WRM_2
 
-Steps :
+Start :
+
+0) git pull
+
+Steps to submit:
 
 1) git add .
 2) git commit -m "I changed everything" 
