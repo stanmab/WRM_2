@@ -1,4 +1,4 @@
-# code.py — shared definitions for Module2.ipynb
+# utils.py — shared definitions for Module2.ipynb
 
 import pandas as pd
 import matplotlib.pyplot as plt
