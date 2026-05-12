@@ -287,7 +287,8 @@ def simulate_arma(model_result, n_months=120, n_simulations=10, seed=42):
     """
     ar = np.r_[1, -model_result.arparams]
     ma = np.r_[1,  model_result.maparams]
-    sigma = np.sqrt(model_result.sigma2)
+    resid = np.asarray(model_result.resid)
+    sigma = np.std(resid[~np.isnan(resid)])
     process = ArmaProcess(ar, ma)
     np.random.seed(seed)
     return [process.generate_sample(nsample=n_months, scale=sigma)
@@ -425,5 +426,45 @@ def plot_joint_distribution(q_monthly, ssc_monthly, title=""):
     ax_right.hist(c, bins=30, orientation="horizontal", color="steelblue", alpha=0.7)
     plt.setp(ax_top.get_xticklabels(), visible=False)
     plt.setp(ax_right.get_yticklabels(), visible=False)
+    plt.tight_layout()
+    return fig
+
+
+# ── Section 6 (exploratory): Seasonal adjustment ─────────────────────────────
+
+def compute_seasonal_means(series):
+    """Compute mean for each calendar month (seasonal climatology).
+    Input:  series (pd.Series) detrended with DatetimeIndex
+    Output: pd.Series indexed 1–12 with monthly mean values
+    """
+    return series.groupby(series.index.month).mean()
+
+def remove_seasonality(series):
+    """Subtract monthly climatology from a detrended series.
+    Input:  series (pd.Series) detrended with DatetimeIndex
+    Output: (seasonally adjusted pd.Series, seasonal_means pd.Series indexed 1–12)
+    """
+    seasonal_means = compute_seasonal_means(series)
+    adjusted = series - series.index.month.map(seasonal_means)
+    return adjusted, seasonal_means
+
+def plot_seasonal_pattern(seasonal_means_dict, ylabel, title):
+    """Bar plot of monthly climatology for multiple series.
+    Input:  seasonal_means_dict (dict {label: pd.Series indexed 1–12});
+            ylabel (str); title (str)
+    Output: matplotlib Figure
+    """
+    fig, ax = plt.subplots(figsize=(10, 4))
+    months = np.arange(1, 13)
+    width = 0.8 / len(seasonal_means_dict)
+    for i, (label, sm) in enumerate(seasonal_means_dict.items()):
+        ax.bar(months + (i - len(seasonal_means_dict) / 2 + 0.5) * width,
+               sm.values, width, label=label, alpha=0.8)
+    ax.set_xticks(months)
+    ax.set_xticklabels(["Jan","Feb","Mar","Apr","May","Jun",
+                         "Jul","Aug","Sep","Oct","Nov","Dec"])
+    ax.set_title(title)
+    ax.set_ylabel(ylabel)
+    ax.legend()
     plt.tight_layout()
     return fig
