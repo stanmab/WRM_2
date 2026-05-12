@@ -151,7 +151,7 @@ def plot_acf_pacf(corr_dict, title=""):
     plt.tight_layout()
     return fig
 
-def select_ar_order(series, max_p=6):
+def select_ar_order(series, max_p=13):
     """Select AR order p minimising AIC over p = 1..max_p.
     Input:  series (pd.Series) detrended; max_p (int)
     Output: (best_p int, aic_list list of (p, aic))
