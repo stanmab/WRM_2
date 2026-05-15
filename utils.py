@@ -101,21 +101,27 @@ def plot_timeseries(series_dict, ylabel, title):
     plt.tight_layout()
     return fig
 
-def plot_trend_fit(series, trend_info, title=""):
+def plot_trend_fit(series, trend_info, title="", ax=None):
     """Plot a time series with its fitted linear trend line.
-    Input:  series (pd.Series); trend_info (dict from fit_linear_trend); title (str)
-    Output: matplotlib Figure
+    Input:  series (pd.Series); trend_info (dict from fit_linear_trend); title (str);
+            ax (matplotlib Axes or None) — if None, creates a new figure
+    Output: matplotlib Figure (None when ax is provided)
     """
     s = series.dropna()
     trend_line = trend_info["slope"] * trend_info["x_numeric"] + trend_info["intercept"]
-    fig, ax = plt.subplots(figsize=(14, 3))
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize=(14, 3))
+    else:
+        fig = None
     ax.plot(trend_info["index"], s.values, alpha=0.7, label="data")
     ax.plot(trend_info["index"], trend_line, "r--",
             label=f"trend  p={trend_info['p_value']:.3f}  R²={trend_info['r_squared']:.4f}")
     ax.set_title(title)
     ax.set_xlabel("Date")
     ax.legend()
-    plt.tight_layout()
+    if standalone:
+        plt.tight_layout()
     return fig
 
 
@@ -133,23 +139,30 @@ def compute_acf_pacf(series, lags=40, alpha=0.05):
     return dict(acf=acf_vals, pacf=pacf_vals,
                 lags=np.arange(lags + 1), conf_bound=conf)
 
-def plot_acf_pacf(corr_dict, title=""):
+def plot_acf_pacf(corr_dict, title="", axes=None):
     """Plot ACF and PACF side by side with 95% CI.
-    Input:  corr_dict (dict from compute_acf_pacf); title (str)
-    Output: matplotlib Figure
+    Input:  corr_dict (dict from compute_acf_pacf); title (str);
+            axes (array of 2 Axes or None) — if None, creates a new figure
+    Output: matplotlib Figure (None when axes is provided)
     """
     lags = corr_dict["lags"]
     ci = corr_dict["conf_bound"]
-    fig, axes = plt.subplots(1, 2, figsize=(14, 4))
+    standalone = axes is None
+    if standalone:
+        fig, axes = plt.subplots(1, 2, figsize=(14, 4))
+    else:
+        fig = None
     for ax, key, label in zip(axes, ["acf", "pacf"], ["ACF", "PACF"]):
         vals = corr_dict[key] if key == "acf" else corr_dict[key][1:]
         x = lags if key == "acf" else lags[1:]
         ax.bar(x, vals, color="steelblue", alpha=0.7, width=0.6)
-        ax.axhline(ci,  color="r", linestyle="--", linewidth=1)
+        ax.axhline(ci,  color="r", linestyle="--", linewidth=1, label="95% CI")
         ax.axhline(-ci, color="r", linestyle="--", linewidth=1)
         ax.set_title(f"{label} — {title}")
         ax.set_xlabel("Lag (months)")
-    plt.tight_layout()
+        ax.legend(fontsize=7)
+    if standalone:
+        plt.tight_layout()
     return fig
 
 def select_ar_order(series, max_p=4):
@@ -163,7 +176,7 @@ def select_ar_order(series, max_p=4):
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                res = ARIMA(vals, order=(p, 0, 0)).fit()
+                res = ARIMA(vals, order=(p, 0, 0)).fit(method="innovations_mle")
             aics.append((p, round(res.aic, 2)))
         except Exception:
             aics.append((p, np.inf))
@@ -182,7 +195,7 @@ def select_arma_order(series, max_p=4, max_q=4):
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    res = ARIMA(vals, order=(p, 0, q)).fit()
+                    res = ARIMA(vals, order=(p, 0, q)).fit(method="innovations_mle")
                 table.append((p, q, round(res.aic, 2)))
             except Exception:
                 table.append((p, q, np.inf))
@@ -194,14 +207,16 @@ def fit_ar(series, order):
     Input:  series (pd.Series) detrended; order (int) AR order p
     Output: statsmodels ARIMAResults
     """
-    return ARIMA(series.dropna().values, order=(order, 0, 0)).fit()
+    return ARIMA(series.dropna().values, order=(order, 0, 0)).fit(
+        method="innovations_mle", low_memory=True)
 
 def fit_arma(series, p, q):
     """Fit ARMA(p,q) model via ARIMA(p,0,q).
     Input:  series (pd.Series) detrended; p (int) AR order; q (int) MA order
     Output: statsmodels ARIMAResults
     """
-    return ARIMA(series.dropna().values, order=(p, 0, q)).fit()
+    return ARIMA(series.dropna().values, order=(p, 0, q)).fit(
+        method="innovations_mle", low_memory=True)
 
 
 # ── Section 3: Evaluation ─────────────────────────────────────────────────────
@@ -215,43 +230,55 @@ def get_theoretical_acf(model_result, lags=40):
     ma = np.r_[1,  model_result.maparams]
     return ArmaProcess(ar, ma).acf(lags + 1)
 
-def plot_acf_comparison(corr_dict, model_result, title=""):
+def plot_acf_comparison(corr_dict, model_result, title="", ax=None):
     """Plot observed ACF vs theoretical ACF with 95% CI on same axes.
-    Input:  corr_dict (dict from compute_acf_pacf); model_result (ARIMAResults); title (str)
-    Output: matplotlib Figure
+    Input:  corr_dict (dict from compute_acf_pacf); model_result (ARIMAResults); title (str);
+            ax (matplotlib Axes or None) — if None, creates a new figure
+    Output: matplotlib Figure (None when ax is provided)
     """
     lags = corr_dict["lags"]
     ci = corr_dict["conf_bound"]
     theo = get_theoretical_acf(model_result, lags=len(lags) - 1)
-    fig, ax = plt.subplots(figsize=(12, 4))
-    ax.bar(lags, corr_dict["acf"], alpha=0.5, label="Observed ACF", color="steelblue")
-    ax.plot(lags, theo, "r-o", markersize=4, label="Theoretical ACF")
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize=(12, 4))
+    else:
+        fig = None
+    ax.bar(lags, corr_dict["acf"], alpha=0.5, label="Obs ACF", color="steelblue")
+    ax.plot(lags, theo, "r-o", markersize=3, label="Theo ACF")
     ax.axhline(ci,  color="k", linestyle="--", linewidth=0.8, label="95% CI")
     ax.axhline(-ci, color="k", linestyle="--", linewidth=0.8)
-    ax.set_title(f"Observed vs Theoretical ACF — {title}")
+    ax.set_title(title, fontsize=9)
     ax.set_xlabel("Lag (months)")
-    ax.legend()
-    plt.tight_layout()
+    ax.legend(fontsize=7)
+    if standalone:
+        plt.tight_layout()
     return fig
 
-def plot_residual_acf(model_result, lags=40, title=""):
+def plot_residual_acf(model_result, lags=40, title="", ax=None):
     """Plot ACF of model residuals with 95% CI.
-    Input:  model_result (ARIMAResults); lags (int); title (str)
-    Output: matplotlib Figure
+    Input:  model_result (ARIMAResults); lags (int); title (str);
+            ax (matplotlib Axes or None) — if None, creates a new figure
+    Output: matplotlib Figure (None when ax is provided)
     """
     resid = np.asarray(model_result.resid)
     resid = resid[~np.isnan(resid)]
     ci = 1.96 / np.sqrt(len(resid))
     acf_vals = acf(resid, nlags=lags, fft=True)
     lag_arr = np.arange(lags + 1)
-    fig, ax = plt.subplots(figsize=(12, 4))
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize=(12, 4))
+    else:
+        fig = None
     ax.bar(lag_arr, acf_vals, color="steelblue", alpha=0.7, width=0.6)
     ax.axhline(ci,  color="r", linestyle="--", linewidth=1, label="95% CI")
     ax.axhline(-ci, color="r", linestyle="--", linewidth=1)
-    ax.set_title(f"Residual ACF — {title}")
+    ax.set_title(f"Residual ACF — {title}", fontsize=9)
     ax.set_xlabel("Lag (months)")
-    ax.legend()
-    plt.tight_layout()
+    ax.legend(fontsize=7)
+    if standalone:
+        plt.tight_layout()
     return fig
 
 def portmanteau_test(model_result, lags=20):
@@ -263,18 +290,34 @@ def portmanteau_test(model_result, lags=20):
     resid = resid[~np.isnan(resid)]
     return acorr_ljungbox(resid, lags=lags, return_df=True)
 
-def normality_test(model_result):
+def normality_test(model_result, ax=None, title="", plot=True):
     """Probability plot and PPCC normality test on model residuals.
-    Input:  model_result (ARIMAResults)
-    Output: (ppcc float, p_value float, Figure)
+    Input:  model_result (ARIMAResults);
+            ax (matplotlib Axes or None) — if None and plot=True, creates a new figure;
+            title (str) label prepended to the PPCC annotation;
+            plot (bool) — set False to compute PPCC/p-value only without any figure
+    Output: (ppcc float, p_value float, Figure or None)
     """
     resid = np.asarray(model_result.resid)
     resid = resid[~np.isnan(resid)]
-    fig, ax = plt.subplots(figsize=(5, 5))
-    (osm, osr), _ = stats.probplot(resid, dist="norm", plot=ax)
+    (osm, osr), _ = stats.probplot(resid, dist="norm")
     ppcc, p_val = stats.pearsonr(osm, osr)
-    ax.set_title(f"Probability Plot  (PPCC={ppcc:.4f}, p={p_val:.4f})")
-    plt.tight_layout()
+    if not plot and ax is None:
+        return ppcc, p_val, None
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize=(5, 5))
+    else:
+        fig = None
+    ax.plot(osm, osr, "o", color="steelblue", markersize=4)
+    slope, intercept = np.polyfit(osm, osr, 1)
+    ax.plot(osm, slope * np.array(osm) + intercept, "r-", linewidth=1)
+    label = f"{title}\n" if title else ""
+    ax.set_title(f"{label}PPCC={ppcc:.3f}  p={p_val:.3f}", fontsize=9)
+    ax.set_xlabel("Theoretical quantiles")
+    ax.set_ylabel("Ordered Values")
+    if standalone:
+        plt.tight_layout()
     return ppcc, p_val, fig
 
 
@@ -295,21 +338,27 @@ def simulate_arma(model_result, n_months=120, n_simulations=10, seed=42):
     return [process.generate_sample(nsample=n_months, scale=sigma)
             for _ in range(n_simulations)]
 
-def plot_synthetic_vs_observed(observed, simulations, title=""):
+def plot_synthetic_vs_observed(observed, simulations, title="", ax=None, n_months=150):
     """Plot synthetic series alongside the observed detrended series.
     Input:  observed (pd.Series) detrended zero-mean; simulations (list of np.array);
-            title (str)
-    Output: matplotlib Figure
+            title (str); ax (matplotlib Axes or None) — if None, creates a new figure;
+            n_months (int) how many months to show (default 150)
+    Output: matplotlib Figure (None when ax is provided)
     """
-    fig, ax = plt.subplots(figsize=(14, 4))
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize=(14, 4))
+    else:
+        fig = None
     for i, sim in enumerate(simulations):
-        ax.plot(sim, color="steelblue", alpha=0.35,
+        ax.plot(sim[:n_months], color="steelblue", alpha=0.35,
                 label="Synthetic" if i == 0 else "")
-    ax.plot(observed.values, color="k", linewidth=1.2, label="Observed (normalised)")
+    ax.plot(observed.values[:n_months], color="k", linewidth=1.2, label="Observed")
     ax.set_title(title)
     ax.set_xlabel("Month")
-    ax.legend()
-    plt.tight_layout()
+    ax.legend(fontsize=8)
+    if standalone:
+        plt.tight_layout()
     return fig
 
 def compare_statistics(observed, simulations):
@@ -441,13 +490,73 @@ def compute_seasonal_means(series):
     return series.groupby(series.index.month).mean()
 
 def remove_seasonality(series):
-    """Subtract monthly climatology from a detrended series.
+    """Monthly standardisation: subtract each month's mean and divide by its std.
+    This removes both the seasonal mean and seasonal variance (heteroscedasticity),
+    which is the Thomas-Fiering standard for stochastic hydrology.  The stored means
+    and stds are used in recompose() to invert the transformation on synthetic series.
     Input:  series (pd.Series) detrended with DatetimeIndex
-    Output: (seasonally adjusted pd.Series, seasonal_means pd.Series indexed 1–12)
+    Output: (standardised pd.Series,
+             seasonal_means pd.Series indexed 1–12,
+             seasonal_stds  pd.Series indexed 1–12)
     """
-    seasonal_means = compute_seasonal_means(series)
-    adjusted = series - series.index.month.map(seasonal_means)
-    return adjusted, seasonal_means
+    seasonal_means = series.groupby(series.index.month).mean()
+    seasonal_stds  = series.groupby(series.index.month).std()
+    month_idx = series.index.month
+    adjusted = (series - month_idx.map(seasonal_means)) / month_idx.map(seasonal_stds)
+    return adjusted, seasonal_means, seasonal_stds
+
+def seasonal_difference(series, period=12):
+    """Seasonal differencing: Y_t = X_t - X_{t-period}.
+
+    WHY: Monthly standardisation (subtract monthly mean, divide by monthly std)
+    assumes the seasonal cycle has a fixed shape every year.  For SSC this does
+    not hold — summer peaks scale with how much snow fell that winter, so the
+    amplitude varies from year to year (multiplicative seasonality).  Monthly
+    standardisation therefore leaves residual seasonal spikes in the ACF and
+    forces a high AR order to absorb them.
+
+    Seasonal differencing makes no assumption about the shape of the cycle: it
+    simply subtracts the value from the same month one year ago, cancelling
+    whatever seasonal pattern existed.  The differenced series Y_t represents
+    the year-over-year *change* in SSC for that calendar month — a stationary,
+    zero-mean quantity that can be modelled with a low-order ARMA.
+
+    COST: loses the first `period` observations and the resulting synthetic
+    series must be inverted before use (see invert_seasonal_diff).
+
+    Input:  series (pd.Series) detrended with DatetimeIndex; period (int)
+    Output: (differenced pd.Series,
+             seed pd.Series — last `period` observed values needed to invert)
+    """
+    diff = series.diff(period).dropna()
+    # Keep last 12 observed values: these seed the inversion X_t = Y_t + X_{t-12}
+    seed = series.iloc[-period:]
+    return diff, seed
+
+def invert_seasonal_diff(simulations, seed, period=12):
+    """Invert seasonal differencing to recover physical-scale synthetic series.
+
+    WHY: the ARMA model was fitted on the differenced series Y_t = X_t - X_{t-12}.
+    To generate synthetic SSC in physical (detrended) units we must undo that
+    operation.  The recursion X_t = Y_t + X_{t-12} requires knowing X for the
+    previous 12 months; we seed those from the last 12 observed detrended values
+    so the simulation starts from the current state of the system.
+
+    Input:  simulations (list of np.array) synthetic differenced residuals Y_t;
+            seed (pd.Series) last `period` observed detrended X values;
+            period (int)
+    Output: list of np.array — synthetic X in detrended physical units
+    """
+    s = seed.values[-period:]
+    result = []
+    for d_sim in simulations:
+        X = np.empty(len(d_sim))
+        for t in range(len(d_sim)):
+            # For the first 12 steps use observed seed; after that use synthetic X
+            prev = s[t] if t < period else X[t - period]
+            X[t] = d_sim[t] + prev
+        result.append(X)
+    return result
 
 def plot_seasonal_pattern(seasonal_means_dict, ylabel, title):
     """Bar plot of monthly climatology for multiple series.
