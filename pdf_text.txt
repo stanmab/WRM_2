@@ -1,0 +1,142 @@
+﻿Module 2 - Timeseries analysis
+International Relations and Transboundary Cooperation
+As an engineer you are called from the Swiss federal government to perform a
+preliminary evaluation on the impact of the Ill River regulation on the Rhein hydrological
+and suspended sediment regime.
+The Ill River is the last major tributary of the Rhein before it enters Lake Constance. The
+Ill River catchment is entirely in Austria and its discharge at the confluence with the
+Rhein is partially regulated by the Illspitz Kraftwerk.
+You are given discharge and suspended sediment concentration time series from the
+Gisingen (eHYD) measuring station on the Ill River and of the Diepoldsau, Rietbrücke
+(BAFU) station for the Rhein River, downstream of the confluence.
+Diepoldsau
+Data:
+Gisingen
+ 2003-2021: C suspended sediment
+Gisingen concentration (g/L – 15min)
+ 1976-2013: Q discharge (m3/s – 15min)
+Diepoldsau, Rietbrücke
+Ill
+ 2012-2025: C suspended sediment
+concentration (g/L – 10 min)
+ 1984-2025: Q discharge (m3/s – 10 min)
+Rhein
+Analysis:
+1. Timeseries review: [2]
+Compute the monthly mean value for both Q and C time series, you will be
+working with monthly data aggregates. Plot the timeseries in their whole length,
+both discharge (Q) and concentration (C). Do they look stationary? Do you notice
+trends?
+Test for stationarity. Build a linear regression model and test the significance of
+the slope to 5% significance. Subtract the mean or any statistically significant
+linear trend. The resulting timeseries should have a mean of zero and a finite
+variance 𝜎(cid:2870).
+(cid:3053)
+Comment whether the statistical trend in the discharge data is the result of a
+measuring error or a physical underlying process. Express your opinion based on
+scientific evidence, if there is any.
+2. Timeseries Modelling: [5]
+Compute the empirical autocorrelation and the approximate 95% confidence
+interval. Compute a partial autocorrelation and the approximate 95% confidence
+interval.
+Fit an AR and an ARMA model based on the results of the autocorrelation
+analysis. Justify your choices of the order based on quantitative observations.
+Can you use the same model order for Q at both locations? Answer the same
+question also for C. Either if yes or no, discuss the choice and the possible
+reasons why, provide a qualitative answer.
+3. Timeseries application & evaluation: [5]
+Compute and plot the empirical autocorrelation function (ACF) of the observed
+data and the theoretical ACF implied by each fitted model. Display them on the
+same plot together with the approximate 95% confidence intervals
+Compute and plot the ACF of the residuals for each model, including the same
+95% confidence intervals. Verify that all residual autocorrelations lie within the
+confidence bounds, discuss whether any significant temporal dependence
+remains.
+Test the independence of the residuals at the 5% significance level with a Porte-
+Manteau Test. Test the normality of each residual series at the 5% significance
+level with a probability plot and PPCC test.
+Discuss your analysis so far. What is the most appropriate model and why? (AR
+or ARMA?). Once you have chosen the most appropriate model (one for C and
+one for Q), discuss if the order of the model is chosen such that the model is
+parsimonious, i.e.: balanced between performance and complexity. Discuss
+your choice and, if reasonable, adjust the order of the model.
+4. Ill to Rhein relative sediment influence: [5]
+For the chosen model, generate 10 time series for the next 10 years. Plot the
+synthetic timeseries with the normalized data series (do not add back the mean
+or the trend for comparison with historical data). Compare the statistical
+characteristics.
+DISCLAIMER: The objective is to compare long-term statistical properties rather
+than time-synchronous behaviour. That is why we could calibrate the models on
+the full available time series at each station. Discuss the implications of
+comparing non-synchronous time series when estimating sediment
+contributions
+At each station, calculate the sediment mass M(t) = C(t)⋅Q(t) [kg/s]. Compute
+the average monthly and yearly sediment yields. Answer the following questions:
+Do the synthetic times series produce similar mass yields (monthly and yearly
+averages), at each station? How much does the Ill contribute to the monthly and
+yearly sediment mass yields at Diepoldsau? Do the synthetic timeseries provide
+valid estimates of the relative sediment contribution of the Ill to the Rhein River?
+5. Independent variables? :[3]
+Is it appropriate to simulate discharge and suspended sediment separately?
+Estimate the correlation between the two variables and both locations. Plot the
+joint distribution of (Q, C) and describe the relationship between the two
+variables. Can Q and C be considered statistically independent? Produce
+quantitative evidence to support the answer to the previous question.
+Discuss the shortfalls of the methodology of simulating dependent variables
+with independent models? How would you resolve these shortcomings?
+Method:
+The final product of this exercise will be automatic code as a Jupyter notebook in .ipynb
+format to perform the analysis. Each of the steps (1 to 5) must be in a di(cid:431)erent section
+of the Jupyter notebook. Each section must be organized in the following way:
+- Markdown cell: Title
+- Cell (MAIN) where you run the analysis
+- Cell (PLOT) following the main cell, where you plot the results
+- Cell (PRINT) to print the results of the analysis, in nice format
+- Markdown cell to comment on the results
+At the start of the notebook import all the necessary packages and libraries for the
+analysis.
+For each section of the .ipynb file, write the necessary functions in a separate .py file,
+import the relevant functions from the .py at the start of each section. In the Jupyter
+Notebook keep ONLY the MAIN, PLOTS and Comments to the results. In the separate
+.py files, each function must be described as (1) what it does, (2) input (3) outputs.
+Inputs and outputs described as type of variable and meanings.
+The code for Module 2 exercise must be running from start to finish. I suggest making
+each section independent from the others, not compromising the entire output. A non-
+running code will not be graded.
+Module 2 is a total of 20 points, each section with the score assigned in brackets []
+GitHub Copilot
+The objective of this module is to get used to version control workflow. In professional
+engineering, teams do not work on the same file simultaneously. Instead, you will work
+separately on features, subject your work to peer review, and only integrate it into the
+stable production code once it has been approved. Groups are composed by two
+people, here referred to A and B. I suggest the following workflow:
+1. Repository Setup: One group member (A) creates the GitHub repository. Initialize
+it with the principal Jupyter Notebook and the all the files .py for each of the
+project sections. Invites member (B)
+2. Branching: Never push code directly to the main branch. For every task, such as
+Section 1, create a new Branch. For example, create the branch “Timeseries
+review:” and work in there until the section is complete.
+3. Commits: Commit your changes often. Each commit should be a small, logical
+step, for example: “implement Kendall-Theil regression”.
+4. The Pull Request: When member A completes a section, it opens a Pull Request
+on GitHub. This is the signal that the code is ready to be inspected.
+5. Peer Review: Member B reviews the code in the Pull Request. Member B leaves
+comments on specific lines of code suggesting improvements or pointing out
+bugs.
+6. Refinement: Member A addresses the review comments, pushes the necessary
+fixes to their branch, and notifies Member B. Once the code is perfect, Member B
+can close the Pull Request and proceed into the merging.
+7. The Merge: Only after approval is the branch merged into main. Once merged,
+delete the feature branch to keep the repository clean.
+Best Practices
+Logic vs. Display: Keep all math and functions in .py files; use. ipynb only for
+visualization. Jupyter Notebooks are notoriously di(cid:431)icult to merge in Git. .py files are
+clean text.
+Main Protection: The main branch must always be functional. If the code on main does
+not run from start to finish, the project is considered broken.
+>> Conflict Resolution: Merge main into your feature branch before your final merge.
+This forces you to solve merge conflicts locally rather than breaking the main code. <<
+NOTE: this GitHub workflow is the BEST PRACTICE you should keep during a
+cooperative coding work. What we require from this project is that each of the group
+components should branch and merge at least once during the project.
+
