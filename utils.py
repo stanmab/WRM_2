@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
+from scipy.optimize import fmin
 from statsmodels.tsa.stattools import acf, pacf
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.arima_process import ArmaProcess
@@ -151,7 +152,7 @@ def plot_acf_pacf(corr_dict, title=""):
     plt.tight_layout()
     return fig
 
-def select_ar_order(series, max_p=13):
+def select_ar_order(series, max_p=4):
     """Select AR order p minimising AIC over p = 1..max_p.
     Input:  series (pd.Series) detrended; max_p (int)
     Output: (best_p int, aic_list list of (p, aic))
@@ -466,5 +467,176 @@ def plot_seasonal_pattern(seasonal_means_dict, ylabel, title):
     ax.set_title(title)
     ax.set_ylabel(ylabel)
     ax.legend()
+    plt.tight_layout()
+    return fig
+
+
+# ── Section 7 (exploratory): Extreme value estimation via synthetic series ────
+
+# Gumbel PPCC critical values r_{n, 0.05} (Looney & Gulledge 1985)
+_S7_PPCC_N   = [10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 75, 100, 150, 200]
+_S7_PPCC_R05 = [0.9260, 0.9383, 0.9460, 0.9505, 0.9538, 0.9563, 0.9582,
+                0.9600, 0.9615, 0.9638, 0.9662, 0.9696, 0.9726, 0.9752]
+
+def _ppcc_crit_s7(n):
+    if n <= _S7_PPCC_N[0]:  return _S7_PPCC_R05[0]
+    if n >= _S7_PPCC_N[-1]: return _S7_PPCC_R05[-1]
+    for k in range(len(_S7_PPCC_N) - 1):
+        if _S7_PPCC_N[k] <= n <= _S7_PPCC_N[k + 1]:
+            t = (n - _S7_PPCC_N[k]) / (_S7_PPCC_N[k + 1] - _S7_PPCC_N[k])
+            return _S7_PPCC_R05[k] + t * (_S7_PPCC_R05[k + 1] - _S7_PPCC_R05[k])
+
+def fit_gumbel_s7(data):
+    """MLE Gumbel (EV Type I) fit to annual maxima.
+    Input:  data (np.array) annual maximum values
+    Output: (loc float, scale float)
+    """
+    def neg_ll(p):
+        if p[1] <= 0: return 1e10
+        return -np.sum(stats.gumbel_r.logpdf(data, loc=p[0], scale=p[1]))
+    s = np.std(data)
+    res = fmin(neg_ll, [np.mean(data) - 0.5772 * s, s], disp=False)
+    return float(res[0]), float(res[1])
+
+def gumbel_quantile_s7(T, loc, scale):
+    """T-year Gumbel return level for annual maxima.
+    Input:  T (float) return period [years]; loc (float); scale (float)
+    Output: float
+    """
+    y_T = -np.log(-np.log(1.0 - 1.0 / T))
+    return loc + scale * y_T
+
+def gumbel_se_s7(T, scale, n):
+    """Kite (1977) asymptotic SE of the T-year Gumbel quantile.
+    Input:  T (float); scale (float); n (int) sample size
+    Output: float
+    """
+    y_T = -np.log(-np.log(1.0 - 1.0 / T))
+    return (scale / np.sqrt(n)) * np.sqrt(1.1087 + 0.5140 * y_T + 0.6079 * y_T ** 2)
+
+def ppcc_gumbel_s7(data, loc, scale):
+    """PPCC test for Gumbel distribution (Looney & Gulledge 1985).
+    Input:  data (np.array); loc (float); scale (float)
+    Output: (r float, r_crit float, reject bool)
+    """
+    n = len(data)
+    x = np.sort(data)
+    q = (np.arange(1, n + 1) - 0.44) / (n + 0.12)
+    w = stats.gumbel_r.ppf(q, loc=loc, scale=scale)
+    r = float(np.corrcoef(x, w)[0, 1])
+    r_crit = _ppcc_crit_s7(n)
+    return r, r_crit, bool(r < r_crit)
+
+def generate_q_synthetic_100yr(model_result_sa, seasonal_means, original_mean,
+                                n_years=100, n_simulations=10, seed=42):
+    """Generate physical Q synthetic series from a seasonally adjusted ARMA model.
+    Input:  model_result_sa — ARIMAResults fitted on seasonally adjusted series
+            seasonal_means  — pd.Series indexed 1–12 (monthly climatology of detrended series)
+            original_mean   — float (mean subtracted during detrending)
+            n_years         — int, length of each simulation in years
+            n_simulations   — int, number of realisations
+            seed            — int
+    Output: list of n_simulations np.arrays of length n_years*12 (physical Q [m³/s])
+    """
+    n_months = n_years * 12
+    sims_sa = simulate_arma(model_result_sa, n_months=n_months,
+                             n_simulations=n_simulations, seed=seed)
+    sm = seasonal_means.values  # length 12
+    seasonal_cycle = np.tile(sm, n_years)  # exactly n_months long
+    return [sim + seasonal_cycle + original_mean for sim in sims_sa]
+
+def extract_annual_maxima(simulations):
+    """Extract annual maxima from monthly synthetic series.
+    Input:  simulations — list of np.arrays, each length = multiple of 12
+    Output: np.array of all annual maxima (all simulations concatenated)
+    """
+    maxima = []
+    for sim in simulations:
+        n_years = len(sim) // 12
+        for y in range(n_years):
+            maxima.append(sim[y * 12:(y + 1) * 12].max())
+    return np.array(maxima)
+
+def return_period_comparison_table(obs_data, syn_data, T_list=None, z90=1.645):
+    """Return period table comparing Gumbel fits to observed and synthetic annual maxima.
+    Input:  obs_data (np.array); syn_data (np.array); T_list (list); z90 (float)
+    Output: pd.DataFrame indexed by T [yr]
+    """
+    if T_list is None:
+        T_list = [10, 30, 50, 100, 300]
+    loc_o, sc_o = fit_gumbel_s7(obs_data)
+    loc_s, sc_s = fit_gumbel_s7(syn_data)
+    n_o, n_s = len(obs_data), len(syn_data)
+    rows = []
+    for T in T_list:
+        xo = gumbel_quantile_s7(T, loc_o, sc_o)
+        so = gumbel_se_s7(T, sc_o, n_o)
+        xs = gumbel_quantile_s7(T, loc_s, sc_s)
+        ss = gumbel_se_s7(T, sc_s, n_s)
+        rows.append({
+            "T (yr)": T,
+            "Obs x_T":  round(xo, 1),
+            "Obs CI_lo": round(xo - z90 * so, 1),
+            "Obs CI_hi": round(xo + z90 * so, 1),
+            "Syn x_T":  round(xs, 1),
+            "Syn CI_lo": round(xs - z90 * ss, 1),
+            "Syn CI_hi": round(xs + z90 * ss, 1),
+        })
+    return pd.DataFrame(rows).set_index("T (yr)")
+
+def generate_q_log_synthetic_100yr(model_result_sa, seasonal_means_log, original_mean_log,
+                                    n_years=100, n_simulations=10, seed=42):
+    """Generate physical Q by simulating in log-space then back-transforming.
+    Workflow: ARMA residuals (log-space) → + seasonal_means_log + original_mean_log
+              → synthetic log(Q) → exp() → physical Q [m³/s]
+    Input:  model_result_sa      — ARIMAResults fitted on log(Q) seasonally adjusted series
+            seasonal_means_log   — pd.Series indexed 1–12 (monthly climatology of detrended log(Q))
+            original_mean_log    — float (mean of detrended log(Q) that was subtracted)
+            n_years, n_simulations, seed — same as generate_q_synthetic_100yr
+    Output: list of n_simulations np.arrays of physical Q [m³/s], length n_years*12
+    """
+    n_months = n_years * 12
+    sims_sa = simulate_arma(model_result_sa, n_months=n_months,
+                             n_simulations=n_simulations, seed=seed)
+    sm = seasonal_means_log.values
+    seasonal_cycle = np.tile(sm, n_years)
+    return [np.exp(sim + seasonal_cycle + original_mean_log) for sim in sims_sa]
+
+def plot_return_period_comparison(obs_data, syn_data, title="",
+                                   T_list=None, z90=1.645):
+    """Semilog return period plot: observed vs synthetic annual maxima with Gumbel fits.
+    Input:  obs_data (np.array); syn_data (np.array); title (str);
+            T_list (list); z90 (float) for 90% CI
+    Output: matplotlib Figure
+    """
+    if T_list is None:
+        T_list = [10, 30, 50, 100, 300]
+    T_curve = np.logspace(np.log10(2), np.log10(400), 300)
+    loc_o, sc_o = fit_gumbel_s7(obs_data)
+    loc_s, sc_s = fit_gumbel_s7(syn_data)
+    n_o, n_s = len(obs_data), len(syn_data)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for data, loc, scale, n, color, label in [
+        (obs_data, loc_o, sc_o, n_o, "steelblue",  f"Observed (n={n_o} yr)"),
+        (syn_data, loc_s, sc_s, n_s, "darkorange", f"Synthetic (n={n_s} yr)"),
+    ]:
+        x_c  = np.array([gumbel_quantile_s7(T, loc, scale) for T in T_curve])
+        se_c = np.array([gumbel_se_s7(T, scale, n)         for T in T_curve])
+        ax.semilogx(T_curve, x_c, color=color, linewidth=2, label=label)
+        ax.fill_between(T_curve, x_c - z90 * se_c, x_c + z90 * se_c,
+                        color=color, alpha=0.15)
+        ii  = np.arange(1, n + 1)
+        q   = (ii - 0.44) / (n + 0.12)
+        T_emp = 1.0 / (1.0 - q)
+        ax.scatter(T_emp, np.sort(data), color=color, s=12, alpha=0.4, zorder=4)
+
+    for T in T_list:
+        ax.axvline(T, color="grey", linewidth=0.5, linestyle=":", alpha=0.5)
+    ax.set_xlabel("Return period T [years]")
+    ax.set_ylabel("Annual maximum Q [m³/s]")
+    ax.set_title(title)
+    ax.legend()
+    ax.grid(True, which="both", alpha=0.3)
     plt.tight_layout()
     return fig
