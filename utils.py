@@ -290,20 +290,34 @@ def portmanteau_test(model_result, lags=20):
     resid = resid[~np.isnan(resid)]
     return acorr_ljungbox(resid, lags=lags, return_df=True)
 
+# Filliben (1975) critical values for the normal PPCC test at α = 0.05.
+# Reject H0 (normality) if PPCC < critical value for the given n.
+_FILLIBEN_N  = [5,      10,     15,     20,     25,     30,     35,     40,
+                45,     50,     60,     75,     100,    150,    200,    300,    500,    1000]
+_FILLIBEN_CV = [0.8299, 0.9347, 0.9429, 0.9503, 0.9563, 0.9604, 0.9643, 0.9670,
+                0.9693, 0.9715, 0.9740, 0.9771, 0.9812, 0.9854, 0.9879, 0.9905, 0.9935, 0.9960]
+
 def normality_test(model_result, ax=None, title="", plot=True):
-    """Probability plot and PPCC normality test on model residuals.
+    """Probability plot and PPCC normality test on model residuals (Filliben 1975).
+    H0: residuals are normally distributed.
+    Test statistic: r = Pearson correlation between ordered residuals and Blom normal quantiles.
+    Decision rule (α=5%): reject H0 if PPCC < r_{n, 0.05} from Filliben's table.
     Input:  model_result (ARIMAResults);
             ax (matplotlib Axes or None) — if None and plot=True, creates a new figure;
-            title (str) label prepended to the PPCC annotation;
-            plot (bool) — set False to compute PPCC/p-value only without any figure
-    Output: (ppcc float, p_value float, Figure or None)
+            title (str) label prepended to the plot title;
+            plot (bool) — set False to compute PPCC/reject only without any figure
+    Output: (ppcc float, reject bool, Figure or None)
     """
     resid = np.asarray(model_result.resid)
     resid = resid[~np.isnan(resid)]
+    n = len(resid)
+    # scipy probplot uses Blom plotting positions: q_i = (i - 3/8)/(n + 1/4) — matches lecture
     (osm, osr), _ = stats.probplot(resid, dist="norm")
-    ppcc, p_val = stats.pearsonr(osm, osr)
+    ppcc, _ = stats.pearsonr(osm, osr)
+    cv_05 = float(np.interp(n, _FILLIBEN_N, _FILLIBEN_CV))
+    reject = bool(ppcc < cv_05)
     if not plot and ax is None:
-        return ppcc, p_val, None
+        return ppcc, reject, None
     standalone = ax is None
     if standalone:
         fig, ax = plt.subplots(figsize=(5, 5))
@@ -313,12 +327,13 @@ def normality_test(model_result, ax=None, title="", plot=True):
     slope, intercept = np.polyfit(osm, osr, 1)
     ax.plot(osm, slope * np.array(osm) + intercept, "r-", linewidth=1)
     label = f"{title}\n" if title else ""
-    ax.set_title(f"{label}PPCC={ppcc:.3f}  p={p_val:.3f}", fontsize=9)
-    ax.set_xlabel("Theoretical quantiles")
-    ax.set_ylabel("Ordered Values")
+    result = "reject H₀" if reject else "accept H₀"
+    ax.set_title(f"{label}PPCC={ppcc:.4f}  CV={cv_05:.4f}  {result}", fontsize=8)
+    ax.set_xlabel("Theoretical quantiles (Blom)")
+    ax.set_ylabel("Ordered residuals")
     if standalone:
         plt.tight_layout()
-    return ppcc, p_val, fig
+    return ppcc, reject, fig
 
 
 # ── Section 4: Synthetic generation & sediment mass ──────────────────────────
