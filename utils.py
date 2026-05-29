@@ -57,7 +57,7 @@ def compute_monthly_mean(df):
     Input:  df (pd.DataFrame) with DatetimeIndex
     Output: pd.DataFrame at month-end frequency
     """
-    return df.resample("M").mean()
+    return df.resample("ME").mean()
 
 def fit_linear_trend(series):
     """Fit OLS linear regression to a series and test slope significance.
@@ -75,8 +75,11 @@ def detrend_series(series, alpha=0.05):
     Input:  series (pd.Series), alpha (float) significance level for slope test
     Output: (detrended pd.Series, trend_info dict with added 'significant' key)
     """
+    
     s = series.dropna()
-    t = fit_linear_trend(s)
+    t= fit_linear_trend(s)
+    # Converts timestamps to the number of days since the start of the series
+    x = (s.index - s.index[0]).days.values
     if t["p_value"] < alpha:
         trend_vals = t["slope"] * t["x_numeric"] + t["intercept"]
         detrended = pd.Series(s.values - trend_vals, index=t["index"], name=series.name)
@@ -397,12 +400,9 @@ def compute_sediment_mass(q_monthly, ssc_monthly):
     return (q * c).dropna()
 
 def monthly_yearly_yields(mass_series):
-    """Compute mean M grouped by calendar month and by year.
-    Input:  mass_series (pd.Series) M [kg/s] with DatetimeIndex
-    Output: (monthly pd.Series index 1-12 [kg/s], yearly pd.Series [kg/s])
-    """
+    """Compute mean M grouped by calendar month and by year."""
     monthly = mass_series.groupby(mass_series.index.month).mean()
-    yearly  = mass_series.resample("A").mean()
+    yearly  = mass_series.resample("YE").mean()
     return monthly, yearly
 
 def synthetic_mass_yields(q_sims, ssc_sims, q_mean, ssc_mean):
@@ -519,6 +519,44 @@ def remove_seasonality(series):
     month_idx = series.index.month
     adjusted = (series - month_idx.map(seasonal_means)) / month_idx.map(seasonal_stds)
     return adjusted, seasonal_means, seasonal_stds
+
+def find_nan_gaps(series):
+    """Find all periods of consecutive NaN values in a time series.
+    
+    Scans the series sequentially and identifies continuous blocks of missing data.
+    Useful for detecting data gaps before splitting time series or applying separate
+    analysis on before/after segments.
+    
+    Input:  series (pd.Series)
+    Output: list of dicts, each with keys:
+            - start_date: timestamp of first NaN in gap
+            - end_date: timestamp of last NaN in gap
+            - start_idx: integer index of first NaN
+            - end_idx: integer index of last NaN
+            - length: number of consecutive NaN observations
+    """
+    gaps = []
+    in_gap = False
+    gap_start_idx = None
+    
+    for i in range(len(series)):
+        if pd.isna(series.iloc[i]):
+            if not in_gap:
+                gap_start_idx = i
+                in_gap = True
+        else:
+            if in_gap:
+                gap_end_idx = i - 1
+                gaps.append({
+                    'start_date': series.index[gap_start_idx],
+                    'end_date': series.index[gap_end_idx],
+                    'start_idx': gap_start_idx,
+                    'end_idx': gap_end_idx,
+                    'length': gap_end_idx - gap_start_idx + 1
+                })
+                in_gap = False
+    
+    return gaps
 
 def seasonal_difference(series, period=12):
     """Seasonal differencing: Y_t = X_t - X_{t-period}.
