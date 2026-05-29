@@ -520,6 +520,73 @@ def remove_seasonality(series):
     adjusted = (series - month_idx.map(seasonal_means)) / month_idx.map(seasonal_stds)
     return adjusted, seasonal_means, seasonal_stds
 
+def remove_seasonality_fourier(series, n_harmonics=2):
+    """Remove seasonality by subtracting a truncated Fourier series (harmonic regression).
+
+    Fits: x(t) = Σ_{k=1}^{K} [a_k·cos(2πkt/12) + b_k·sin(2πkt/12)]
+    using OLS, then subtracts the fitted cycle.  Unlike Thomas-Fiering monthly
+    standardisation, this uses only 2K parameters for the seasonal mean and does
+    not rescale the variance — residuals retain their original scale.
+
+    Input:  series (pd.Series) detrended with DatetimeIndex
+            n_harmonics (int) K — number of harmonic pairs (default 2)
+    Output: (residuals pd.Series,
+             seasonal_cycle pd.Series — fitted values at each observation,
+             monthly_cycle np.array length 12 — mean fitted value per calendar month 0–11)
+    """
+    s = series.dropna()
+    n = len(s)
+    T = 12.0
+    t = np.arange(n, dtype=float)
+    cols = []
+    for k in range(1, n_harmonics + 1):
+        cols.append(np.cos(2 * np.pi * k * t / T))
+        cols.append(np.sin(2 * np.pi * k * t / T))
+    X = np.column_stack(cols)
+    coeffs, _, _, _ = np.linalg.lstsq(X, s.values, rcond=None)
+    fitted = X @ coeffs
+    residuals = pd.Series(s.values - fitted, index=s.index, name=s.name)
+    seasonal_cycle = pd.Series(fitted, index=s.index, name="seasonal_cycle")
+    m_idx = s.index.month - 1  # 0-indexed
+    monthly_cycle = np.array([fitted[m_idx == m].mean() for m in range(12)])
+    return residuals, seasonal_cycle, monthly_cycle
+
+
+def plot_fourier_vs_monthly(series, seasonal_cycle, seasonal_means, title="", ax=None):
+    """Bar comparison of Fourier-fitted vs Thomas-Fiering monthly seasonal means.
+    Input:  series (pd.Series) detrended;
+            seasonal_cycle (pd.Series) Fourier fitted values at each t;
+            seasonal_means (pd.Series) Thomas-Fiering monthly means indexed 1–12;
+            title (str); ax (matplotlib Axes or None)
+    Output: matplotlib Figure (None when ax is provided)
+    """
+    s = series.dropna()
+    m_idx = s.index.month
+    fourier_monthly = np.array([seasonal_cycle.values[m_idx == m].mean() for m in range(1, 13)])
+    months = np.arange(1, 13)
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize=(10, 4))
+    else:
+        fig = None
+    obs_monthly = np.array([s[s.index.month == m].mean() for m in range(1, 13)])
+    obs_std     = np.array([s[s.index.month == m].std()  for m in range(1, 13)])
+    ax.bar(months - 0.2, seasonal_means.values, 0.35,
+           label="Thomas-Fiering", color="steelblue", alpha=0.8)
+    ax.bar(months + 0.2, fourier_monthly, 0.35,
+           label="Fourier fit", color="darkorange", alpha=0.8)
+    ax.errorbar(months, obs_monthly, yerr=obs_std, fmt="ko-", markersize=5,
+                linewidth=1.2, elinewidth=1.2, capsize=4, capthick=1.2,
+                label="Observed mean ± std", zorder=5)
+    ax.set_xticks(months)
+    ax.set_xticklabels(["J","F","M","A","M","J","J","A","S","O","N","D"])
+    ax.set_title(title)
+    ax.legend(fontsize=8)
+    if standalone:
+        plt.tight_layout()
+    return fig
+
+
 def seasonal_difference(series, period=12):
     """Seasonal differencing: Y_t = X_t - X_{t-period}.
 
