@@ -495,6 +495,96 @@ def plot_joint_distribution(q_monthly, ssc_monthly, title=""):
     return fig
 
 
+# ── Heteroscedasticity check (Lecture Notes Module 3, §6.2.3) ────────────────
+
+def plot_heteroscedasticity_check(series_dict, title=""):
+    """Plot monthly std vs monthly mean for raw and log-transformed series.
+    Per lecture notes §6.2.3: non-constant variance → heteroscedastic →
+    transform y to achieve homoscedasticity (log moves down the ladder).
+    Input:  series_dict (dict {label: pd.Series}) raw monthly series with DatetimeIndex
+            title (str)
+    Output: matplotlib Figure
+    """
+    labels = list(series_dict.keys())
+    n = len(labels)
+    fig, axes = plt.subplots(2, n, figsize=(5 * n, 7))
+    if n == 1:
+        axes = axes.reshape(2, 1)
+    month_abbr = ["J","F","M","A","M","J","J","A","S","O","N","D"]
+    for col, label in enumerate(labels):
+        raw = series_dict[label].dropna()
+        log = np.log(raw)
+        for row, (ser, space) in enumerate([(raw, "raw"), (log, "log")]):
+            mm = ser.groupby(ser.index.month).mean()
+            ms = ser.groupby(ser.index.month).std()
+            r  = float(np.corrcoef(mm.values, ms.values)[0, 1])
+            ax = axes[row, col]
+            ax.scatter(mm.values, ms.values, color="steelblue", s=60, zorder=3)
+            for m in mm.index:
+                ax.annotate(month_abbr[m - 1], (mm[m], ms[m]),
+                            fontsize=7, ha="center", va="bottom")
+            c = np.polyfit(mm.values, ms.values, 1)
+            xl = np.linspace(mm.min(), mm.max(), 50)
+            ax.plot(xl, np.polyval(c, xl), "r--", linewidth=1)
+            ax.set_xlabel(f"Monthly mean [{space}]")
+            ax.set_ylabel(f"Monthly std [{space}]")
+            ax.set_title(f"{label} [{space}]  r={r:.3f}")
+    if title:
+        plt.suptitle(title, fontsize=10)
+    plt.tight_layout()
+    return fig
+
+
+# ── Fourier seasonality (Salas 1993, Handbook of Hydrology ch. 19) ───────────
+
+def fit_fourier_seasonality(series, max_harmonics=6):
+    """Select K Fourier harmonics by AICc and fit the seasonal component.
+    Model: S(t) = Σ_k [A_k·cos(2πkt/12) + B_k·sin(2πkt/12)], k=1..K
+    K is chosen as the value minimising AICc (Salas 1993).
+    Input:  series (pd.Series) detrended monthly series with DatetimeIndex
+            max_harmonics (int) maximum K to evaluate
+    Output: (seasonal pd.Series same index as series.dropna(),
+             best_k int,
+             aicc_list list of (k, aicc))
+    """
+    s = series.dropna()
+    t = np.arange(1, len(s) + 1, dtype=float)
+    y = s.values
+    n = len(y)
+    aicc_list = []
+    for k in range(1, max_harmonics + 1):
+        cols = []
+        for h in range(1, k + 1):
+            cols.append(np.cos(2 * np.pi * h * t / 12))
+            cols.append(np.sin(2 * np.pi * h * t / 12))
+        X = np.column_stack(cols)
+        coeffs, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
+        sse = np.sum((y - X @ coeffs) ** 2)
+        p = 2 * k
+        aicc = n * np.log(sse / n) + 2 * p + 2 * p * (p + 1) / max(n - p - 1, 1)
+        aicc_list.append((k, round(aicc, 2)))
+    best_k = min(aicc_list, key=lambda x: x[1])[0]
+    cols = []
+    for h in range(1, best_k + 1):
+        cols.append(np.cos(2 * np.pi * h * t / 12))
+        cols.append(np.sin(2 * np.pi * h * t / 12))
+    X = np.column_stack(cols)
+    coeffs, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
+    seasonal = pd.Series(X @ coeffs, index=s.index, name="seasonal")
+    return seasonal, best_k, aicc_list
+
+
+def remove_fourier_seasonality(series, max_harmonics=6):
+    """Subtract Fourier seasonal component from a detrended series.
+    Input:  series (pd.Series) detrended monthly with DatetimeIndex
+            max_harmonics (int)
+    Output: (deseasonalized pd.Series, seasonal pd.Series, best_k int)
+    """
+    seasonal, best_k, _ = fit_fourier_seasonality(series, max_harmonics)
+    deseasonalized = series.dropna() - seasonal
+    return deseasonalized, seasonal, best_k
+
+
 # ── Section 6 (exploratory): Seasonal adjustment ─────────────────────────────
 
 def compute_seasonal_means(series):
